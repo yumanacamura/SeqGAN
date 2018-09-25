@@ -1,0 +1,4 @@
+/data/*.pickle
+/save/*.txt
+/result/*.txt
+/__pycache__/

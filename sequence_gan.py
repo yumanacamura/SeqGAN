@@ -5,14 +5,13 @@ from dataloader import Gen_Data_loader, Dis_dataloader
 from generator import Generator
 from discriminator import Discriminator
 from rollout import ROLLOUT
-from target_lstm import TARGET_LSTM
 import pickle
 
 #########################################################################################
 #  Generator  Hyper-parameters
 ######################################################################################
-EMB_DIM = 32 # embedding dimension
-HIDDEN_DIM = 32 # hidden state dimension of lstm cell
+EMB_DIM = 64 # embedding dimension
+HIDDEN_DIM = 64+EMB_DIM # hidden state dimension of lstm cell
 SEQ_LENGTH = 20 # sequence length
 START_TOKEN = 0
 PRE_EPOCH_NUM = 120 # supervise (maximum likelihood estimation) epochs
@@ -32,47 +31,78 @@ dis_batch_size = 64
 #########################################################################################
 #  Basic Training Parameters
 #########################################################################################
-TOTAL_BATCH = 200
+TOTAL_BATCH = 2000
 positive_file = 'save/real_data.txt'
 negative_file = 'save/generator_sample.txt'
-eval_file = 'save/eval_file.txt'
-generated_num = 10000
+generated_num = 1024
 
 
-def generate_samples(sess, trainable_model, batch_size, generated_num, output_file):
+def generate_samples(sess, trainable_model, batch_size, generated_num, output_file,kigo_list):
     # Generate Samples
     generated_samples = []
     for _ in range(int(generated_num / batch_size)):
-        generated_samples.extend(trainable_model.generate(sess))
+        kigos = select_kigos(kigo_list, batch_size)
+        generated_samples.extend(trainable_model.generate(sess, kigos))
 
     with open(output_file, 'w') as fout:
         for poem in generated_samples:
             buffer = ' '.join([str(x) for x in poem]) + '\n'
             fout.write(buffer)
 
+def generate_samples_with_pred(sess, generator, discriminator, batch_size, generated_num, output_file,kigo_list):
+    # Generate Samples & Predict Samples
+    generated_samples = []
+    kigos = []
+    predictions = []
+    for _ in range(int(generated_num / batch_size)):
+        new_kigos = select_kigos(kigo_list, batch_size)
+        kigos.extend(new_kigos)
+        samples = generator.generate(sess, new_kigos)
+        generated_samples.extend(samples)
+        feed = {
+            discriminator.input_x: samples,
+            discriminator.dropout_keep_prob: 1
+        }
+        new_predictions = sess.run(discriminator.ypred_for_auc, feed_dict = feed)
+        predictions.extend(new_predictions)
 
-def target_loss(sess, target_lstm, data_loader):
-    # target_loss means the oracle negative log-likelihood tested with the oracle model "target_lstm"
-    # For more details, please see the Section 4 in https://arxiv.org/abs/1609.05473
-    nll = []
-    data_loader.reset_pointer()
+    data = []
+    for h,k,p in zip(generated_samples,kigos,predictions):
+        tmp = '{0},{1},{2}'.format(
+            ' '.join([str(i) for i in h]),
+            k,
+            p[1]
+        )
+        data.append(tmp)
+    with open(output_file, 'w') as f:
+        f.write('\n'.join(data))
 
-    for it in range(data_loader.num_batch):
-        batch = data_loader.next_batch()
-        g_loss = sess.run(target_lstm.pretrain_loss, {target_lstm.x: batch})
-        nll.append(g_loss)
+def select_haikus(haiku_list, selected_num, output_file):
+    # Select Haikus
+    idx = np.random.randint(0, haiku_list.shape[0], selected_num)
 
-    return np.mean(nll)
+    haiku = haiku_list[idx]
 
+    with open(output_file, 'w') as fout:
+        for poem in haiku:
+            buffer = ' '.join([str(x) for x in poem]) + '\n'
+            fout.write(buffer)
 
-def pre_train_epoch(sess, trainable_model, data_loader):
+def select_kigos(kigo_list, selected_num):
+    # Select Kigos
+    idx = np.random.randint(0, kigo_list.shape[0], selected_num)
+
+    return kigo_list[idx]
+
+def pre_train_epoch(sess, trainable_model, data_loader, kigo_list):
     # Pre-train the generator using MLE for one epoch
     supervised_g_losses = []
     data_loader.reset_pointer()
 
     for it in range(data_loader.num_batch):
         batch = data_loader.next_batch()
-        _, g_loss = trainable_model.pretrain_step(sess, batch)
+        kigos = select_kigos(kigo_list, data_loader.batch_size)
+        _, g_loss = trainable_model.pretrain_step(sess, batch, kigos)
         supervised_g_losses.append(g_loss)
 
     return np.mean(supervised_g_losses)
@@ -84,15 +114,15 @@ def main():
     assert START_TOKEN == 0
 
     gen_data_loader = Gen_Data_loader(BATCH_SIZE)
-    likelihood_data_loader = Gen_Data_loader(BATCH_SIZE) # For testing
-    vocab_size = 5000
     dis_data_loader = Dis_dataloader(BATCH_SIZE)
-
+    with open('data/ihaiku_ikigo.pickle','rb') as f:
+        haiku_list,kigo_list = pickle.load(f)
+    with open('data/index.pickle','rb') as f:
+        index = pickle.load(f)
+    vocab_size = len(index)
     generator = Generator(vocab_size, BATCH_SIZE, EMB_DIM, HIDDEN_DIM, SEQ_LENGTH, START_TOKEN)
-    target_params = pickle.load(open('save/target_params.pkl','rb'), encoding='latin1')
-    target_lstm = TARGET_LSTM(vocab_size, BATCH_SIZE, EMB_DIM, HIDDEN_DIM, SEQ_LENGTH, START_TOKEN, target_params) # The oracle model
 
-    discriminator = Discriminator(sequence_length=20, num_classes=2, vocab_size=vocab_size, embedding_size=dis_embedding_dim, 
+    discriminator = Discriminator(sequence_length=20, num_classes=2, vocab_size=vocab_size, embedding_size=dis_embedding_dim,
                                 filter_sizes=dis_filter_sizes, num_filters=dis_num_filters, l2_reg_lambda=dis_l2_reg_lambda)
 
     config = tf.ConfigProto()
@@ -100,28 +130,24 @@ def main():
     sess = tf.Session(config=config)
     sess.run(tf.global_variables_initializer())
 
-    # First, use the oracle model to provide the positive examples, which are sampled from the oracle data distribution
-    generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, positive_file)
-    gen_data_loader.create_batches(positive_file)
-
     log = open('save/experiment-log.txt', 'w')
     #  pre-train generator
     print('Start pre-training...')
     log.write('pre-training...\n')
     for epoch in range(PRE_EPOCH_NUM):
-        loss = pre_train_epoch(sess, generator, gen_data_loader)
+        select_haikus(haiku_list, generated_num, positive_file)
+        gen_data_loader.create_batches(positive_file)
+        loss = pre_train_epoch(sess, generator, gen_data_loader,kigo_list)
         if epoch % 5 == 0:
-            generate_samples(sess, generator, BATCH_SIZE, generated_num, eval_file)
-            likelihood_data_loader.create_batches(eval_file)
-            test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
-            print('pre-train epoch ', epoch, 'test_loss ', test_loss)
-            buffer = 'epoch:\t'+ str(epoch) + '\tnll:\t' + str(test_loss) + '\n'
+            print('pre-train epoch ', epoch)
+            buffer = 'epoch:\t'+ str(epoch) + '\n'
             log.write(buffer)
 
     print('Start pre-training discriminator...')
     # Train 3 epoch on the generated data and do this for 50 times
     for _ in range(50):
-        generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file)
+        select_haikus(haiku_list, generated_num, positive_file)
+        generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file, kigo_list)
         dis_data_loader.load_train_data(positive_file, negative_file)
         for _ in range(3):
             dis_data_loader.reset_pointer()
@@ -142,26 +168,22 @@ def main():
     for total_batch in range(TOTAL_BATCH):
         # Train the generator for one step
         for it in range(1):
-            samples = generator.generate(sess)
-            rewards = rollout.get_reward(sess, samples, 16, discriminator)
-            feed = {generator.x: samples, generator.rewards: rewards}
+            kigos = select_kigos(kigo_list, BATCH_SIZE)
+            samples, rate = generator.generate_with_rate(sess,kigos)
+            rewards = rollout.get_reward(sess, samples, 16, discriminator, rate)
+            feed = {
+                generator.x: samples,
+                generator.rewards: rewards,
+                generator.kigo: kigos}
             _ = sess.run(generator.g_updates, feed_dict=feed)
-
-        # Test
-        if total_batch % 5 == 0 or total_batch == TOTAL_BATCH - 1:
-            generate_samples(sess, generator, BATCH_SIZE, generated_num, eval_file)
-            likelihood_data_loader.create_batches(eval_file)
-            test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
-            buffer = 'epoch:\t' + str(total_batch) + '\tnll:\t' + str(test_loss) + '\n'
-            print('total_batch: ', total_batch, 'test_loss: ', test_loss)
-            log.write(buffer)
 
         # Update roll-out parameters
         rollout.update_params()
 
         # Train the discriminator
         for _ in range(5):
-            generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file)
+            select_haikus(haiku_list, generated_num, positive_file)
+            generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file, kigo_list)
             dis_data_loader.load_train_data(positive_file, negative_file)
 
             for _ in range(3):
@@ -174,6 +196,14 @@ def main():
                         discriminator.dropout_keep_prob: dis_dropout_keep_prob
                     }
                     _ = sess.run(discriminator.train_op, feed)
+
+        # Test
+        print('total_batch:', total_batch,)
+        if total_batch-1 % 50 == 0:
+            output_file = 'result/result_{0:04d}_epoch.txt'.format(total_batch)
+            generate_samples_with_pred(sess, generator, discriminator, BATCH_SIZE, generated_num, output_file,kigo_list)
+            buffer = 'epoch:\t' + str(total_batch) + '\n'
+            log.write(buffer)
 
     log.close()
 
