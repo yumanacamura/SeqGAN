@@ -11,7 +11,7 @@ import pickle
 #  Generator  Hyper-parameters
 ######################################################################################
 EMB_DIM = 64 # embedding dimension
-HIDDEN_DIM = 64+EMB_DIM # hidden state dimension of lstm cell
+HIDDEN_DIM = 64 # hidden state dimension of lstm cell
 SEQ_LENGTH = 20 # sequence length
 START_TOKEN = 0
 PRE_EPOCH_NUM = 120 # supervise (maximum likelihood estimation) epochs
@@ -41,8 +41,7 @@ def generate_samples(sess, trainable_model, batch_size, generated_num, output_fi
     # Generate Samples
     generated_samples = []
     for _ in range(int(generated_num / batch_size)):
-        kigos = select_kigos(kigo_list, batch_size)
-        generated_samples.extend(trainable_model.generate(sess, kigos))
+        generated_samples.extend(trainable_model.generate(sess))
 
     with open(output_file, 'w') as fout:
         for poem in generated_samples:
@@ -52,12 +51,9 @@ def generate_samples(sess, trainable_model, batch_size, generated_num, output_fi
 def generate_samples_with_pred(sess, generator, discriminator, batch_size, generated_num, output_file,kigo_list):
     # Generate Samples & Predict Samples
     generated_samples = []
-    kigos = []
     predictions = []
     for _ in range(int(generated_num / batch_size)):
-        new_kigos = select_kigos(kigo_list, batch_size)
-        kigos.extend(new_kigos)
-        samples = generator.generate(sess, new_kigos)
+        samples = generator.generate(sess)
         generated_samples.extend(samples)
         feed = {
             discriminator.input_x: samples,
@@ -67,10 +63,9 @@ def generate_samples_with_pred(sess, generator, discriminator, batch_size, gener
         predictions.extend(new_predictions)
 
     data = []
-    for h,k,p in zip(generated_samples,kigos,predictions):
-        tmp = '{0},{1},{2}'.format(
+    for h,p in zip(generated_samples,predictions):
+        tmp = '{0},{1}'.format(
             ' '.join([str(i) for i in h]),
-            k,
             p[1]
         )
         data.append(tmp)
@@ -88,12 +83,6 @@ def select_haikus(haiku_list, selected_num, output_file):
             buffer = ' '.join([str(x) for x in poem]) + '\n'
             fout.write(buffer)
 
-def select_kigos(kigo_list, selected_num):
-    # Select Kigos
-    idx = np.random.randint(0, kigo_list.shape[0], selected_num)
-
-    return kigo_list[idx]
-
 def pre_train_epoch(sess, trainable_model, data_loader, kigo_list):
     # Pre-train the generator using MLE for one epoch
     supervised_g_losses = []
@@ -101,8 +90,7 @@ def pre_train_epoch(sess, trainable_model, data_loader, kigo_list):
 
     for it in range(data_loader.num_batch):
         batch = data_loader.next_batch()
-        kigos = select_kigos(kigo_list, data_loader.batch_size)
-        _, g_loss = trainable_model.pretrain_step(sess, batch, kigos)
+        _, g_loss = trainable_model.pretrain_step(sess, batch)
         supervised_g_losses.append(g_loss)
 
     return np.mean(supervised_g_losses)
@@ -115,8 +103,9 @@ def main():
 
     gen_data_loader = Gen_Data_loader(BATCH_SIZE)
     dis_data_loader = Dis_dataloader(BATCH_SIZE)
-    with open('data/ihaiku_ikigo.pickle','rb') as f:
-        haiku_list,kigo_list = pickle.load(f)
+    with open('data/ihaiku.pickle','rb') as f:
+        haiku_list = pickle.load(f)
+    #usew2v---------------------------------------------------------------------------------------------
     with open('data/index.pickle','rb') as f:
         index = pickle.load(f)
     vocab_size = len(index)
@@ -137,7 +126,7 @@ def main():
     for epoch in range(PRE_EPOCH_NUM):
         select_haikus(haiku_list, generated_num, positive_file)
         gen_data_loader.create_batches(positive_file)
-        loss = pre_train_epoch(sess, generator, gen_data_loader,kigo_list)
+        loss = pre_train_epoch(sess, generator, gen_data_loader)
         if epoch % 5 == 0:
             print('pre-train epoch ', epoch)
             buffer = 'epoch:\t'+ str(epoch) + '\n'
@@ -147,7 +136,7 @@ def main():
     # Train 3 epoch on the generated data and do this for 50 times
     for _ in range(50):
         select_haikus(haiku_list, generated_num, positive_file)
-        generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file, kigo_list)
+        generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file)
         dis_data_loader.load_train_data(positive_file, negative_file)
         for _ in range(3):
             dis_data_loader.reset_pointer()
@@ -173,8 +162,7 @@ def main():
             rewards = rollout.get_reward(sess, samples, 16, discriminator, rate)
             feed = {
                 generator.x: samples,
-                generator.rewards: rewards,
-                generator.kigo: kigos}
+                generator.rewards: rewards}
             _ = sess.run(generator.g_updates, feed_dict=feed)
 
         # Update roll-out parameters
@@ -183,7 +171,7 @@ def main():
         # Train the discriminator
         for _ in range(5):
             select_haikus(haiku_list, generated_num, positive_file)
-            generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file, kigo_list)
+            generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file)
             dis_data_loader.load_train_data(positive_file, negative_file)
 
             for _ in range(3):
@@ -201,7 +189,7 @@ def main():
         print('total_batch:', total_batch,)
         if total_batch-1 % 50 == 0:
             output_file = 'result/result_{0:04d}_epoch.txt'.format(total_batch)
-            generate_samples_with_pred(sess, generator, discriminator, BATCH_SIZE, generated_num, output_file,kigo_list)
+            generate_samples_with_pred(sess, generator, discriminator, BATCH_SIZE, generated_num, output_file)
             buffer = 'epoch:\t' + str(total_batch) + '\n'
             log.write(buffer)
 
