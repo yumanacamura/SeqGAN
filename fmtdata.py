@@ -2,13 +2,17 @@ import pickle
 import MeCab
 import re
 from collections import Counter
-import numpy as np
 
-th_count =1
-words = []
+
 shkigo = []
 m = MeCab.Tagger('-Owakati')
 p = re.compile(r'[（(].+?[）)]')
+
+with open('data/index.pickle','rb') as f:
+    index = pickle.load(f)
+with open('data/index_inv.pickle','rb') as f:
+    index_inv = pickle.load(f)
+
 
 with open('data/hkigo.pickle','rb') as f:
     hkigo = pickle.load(f)
@@ -26,6 +30,8 @@ for h,k in hkigo:
     if k not in sh:
         print(k,'isnt in',sh)
         continue
+    if False in [w in index for w in sh]:
+        print(''.join(sh),'isnt in index')
     words+=sh
     shkigo.append((sh,k))
 

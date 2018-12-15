@@ -1,4 +1,7 @@
-/data/*.pickle
-/save/*.txt
-/result/*.txt
+/data/*
+/save/*
+/result/*
+/model/*
 /__pycache__/
+
+!.keep
