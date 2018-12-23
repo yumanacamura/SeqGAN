@@ -35,9 +35,6 @@ for h,k in hkigo:
     words+=sh
     shkigo.append((sh,k))
 
-#remove word
-words = [w for w,c in Counter(words).items() if c>=th_count]
-
 #make index
 index = ['<EOS>','<p>']+words
 index_inv = {w:i for i,w in enumerate(index)}
