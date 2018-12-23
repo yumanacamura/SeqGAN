@@ -1,21 +1,17 @@
 import pickle
+from gensim.models.keyedvectors import Word2VecKeyedVectors
 
-#open w2v
-
-
-#make w2v to list or other
-
+model = Word2VecKeyedVectors.load('model/wv.model')
 
 #make index
-index = []
+index = model.index2entity
 index_inv = {}
-for i,word in words:
-    index.append(word)
+for i,word in enumerate(index):
     index_inv[word] = i
 
 #check
-for i,word in enumerate(index_inv):
-    if i!=index[word]:
+for i,word in enumerate(index):
+    if i!=index_inv[word]:
         print('something is wrong')
         exit()
 
