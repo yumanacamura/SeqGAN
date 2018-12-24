@@ -1,3 +1,4 @@
+import pickle
 import tensorflow as tf
 from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 
@@ -22,7 +23,8 @@ class Generator(object):
         self.expected_reward = tf.Variable(tf.zeros([self.sequence_length]))
 
         with tf.variable_scope('generator'):
-            self.g_embeddings = tf.Variable(self.init_matrix([self.num_emb, self.emb_dim]))
+            with open('data/vec.pickle') as f:
+                self.g_embeddings = tf.Variable(pickle.load(f),trainable=False)
             self.g_params.append(self.g_embeddings)
             self.g_recurrent_unit = self.create_recurrent_unit(self.g_params)  # maps h_tm1 to h_t for generator
             self.g_output_unit = self.create_output_unit(self.g_params)  # maps h_t to o_t (output token logits)
