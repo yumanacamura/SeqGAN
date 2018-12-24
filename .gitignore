@@ -2,6 +2,7 @@
 /save/*
 /result/*
 /model/*
+/kigo/model/*
 /__pycache__/
 
 !.keep
