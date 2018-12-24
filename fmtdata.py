@@ -29,7 +29,6 @@ for h,k in hkigo:
         continue
     if False in [w in index for w in sh]:
         print(''.join(sh),'isnt in index')
-    words+=sh
     shkigo.append((sh,k))
 
 
