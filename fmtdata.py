@@ -38,9 +38,6 @@ ikigo = []
 #word2index
 for sh,k in shkigo:
     for w in sh:
-        if w not in words:
-            print(w,'is too little')
-            continue
         ih = [index_inv[w] if w!=k else index_inv['季語'] for w in sh]
         ihaiku.append(ih + [0] + [1 for i in range(19-len(ih))])
         ikigo.append(index_inv[k])
