@@ -10,8 +10,8 @@ pk = re.compile(r'(?<=季　語</font></div></td> \n                  <td width=
 
 hkigo = []
 
-for i in range(1,41189):
-    sleep(1)
+for i in range(1,41360):
+    sleep(0.2)
     resource = urllib.request.urlopen(url+str(i))
     contents = resource.read().decode()
     haiku = ph.findall(contents)

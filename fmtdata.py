@@ -1,6 +1,7 @@
 import pickle
 import MeCab
 import re
+import numpy as np
 
 shkigo = []
 m = MeCab.Tagger('-Owakati')
@@ -22,13 +23,14 @@ for h,k in hkigo:
     sh = m.parse(h).split()
     if len(sh)>19:
         print('yabai'+'#'*300,h)
-        input()
+        #input()
         continue
     if k not in sh:
-        print(k,'isnt in',sh)
+        pass#print(k,'isnt in',sh)
         continue
     if False in [w in index for w in sh]:
-        print(''.join(sh),'isnt in index')
+        pass#print(''.join(sh),'isnt in index')
+        continue
     shkigo.append((sh,k))
 
 
